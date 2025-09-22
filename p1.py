@@ -1,20 +1,3 @@
-"""
-CP-ESCOA Cost Extract Reconciliation System
-==========================================
-
-This script processes Excel files containing GL and Cost Extract data.
-All processing results are written back to the SAME main file without disturbing existing data.
-
-Key Features:
-- Reads GL and Cost Extract data from the same Excel file
-- Creates reconciliation summary in the same file
-- Generates detailed variance analysis sheets in the same file
-- Preserves all existing sheets and data
-- No fallback files - everything goes to the main file
-
-Author: Cost & AR Timing Team
-"""
-
 import pandas as pd
 import numpy as np
 import re
@@ -219,8 +202,11 @@ def create_variance_sheets(main_file_path=None):
         print("Please ensure the file exists in the current directory.")
         return
     
-    # Since we're using the same file for both input and source, no need to check source_file separately
-    print(f"Using main file for both input and source: {input_file}")
+    # Check if source file exists
+    if not os.path.exists(source_file):
+        print(f"Error: {source_file} not found!")
+        print("Please ensure the source file exists in the current directory.")
+        return
     
     try:
         # Read the reconciliation summary
@@ -294,13 +280,12 @@ def create_variance_sheets(main_file_path=None):
                 print(f"Error creating sheet '{sheet_name}': {str(e)}")
                 continue
         
-        # Save the workbook with new sheets back to the same main file
-        print(f"\nSaving workbook with {sheets_created} new sheets to main file...")
+        # Save the workbook with new sheets
+        print(f"\nSaving workbook with {sheets_created} new sheets...")
         workbook.save(input_file)
         
         print(f"Successfully created {sheets_created} new sheets with tables in {input_file}")
         print("Each sheet contains GL and IBS tables with aggregated data.")
-        print("All data has been written to the same main file without disturbing existing data.")
         
         # Display summary
         print(f"\nSummary:")
@@ -1323,8 +1308,7 @@ if __name__ == "__main__":
         print(f"Using main file: {main_path}")
         create_variance_sheets(main_path)
     else:
-        print("Error: Main reconciliation process must be run first to set main_path.")
-        print("Please run the complete script to ensure main_path is available.")
-        exit()
+        print("Main reconciliation not run yet. Running variance analysis with default files...")
+        create_variance_sheets()
     
     print("\nProcess completed!")
