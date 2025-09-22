@@ -1,3 +1,20 @@
+"""
+CP-ESCOA Cost Extract Reconciliation System
+==========================================
+
+This script processes Excel files containing GL and Cost Extract data.
+All processing results are written back to the SAME main file without disturbing existing data.
+
+Key Features:
+- Reads GL and Cost Extract data from the same Excel file
+- Creates reconciliation summary in the same file
+- Generates detailed variance analysis sheets in the same file
+- Preserves all existing sheets and data
+- No fallback files - everything goes to the main file
+
+Author: Cost & AR Timing Team
+"""
+
 import pandas as pd
 import numpy as np
 import re
@@ -20,10 +37,48 @@ Tk().withdraw()
 print("CP-ESCOA Cost extract Weekly reconcilition Final Jul 2025:")
 main_path = filedialog.askopenfilename(title="CP-ESCOA Cost extract Weekly reconcilition Final Jul 2025")
 
+# Validate the selected file
+if not main_path:
+    print("No file selected. Exiting...")
+    exit()
+
+if not os.path.exists(main_path):
+    print(f"Selected file does not exist: {main_path}")
+    exit()
+
+print(f"Selected file: {main_path}")
+print(f"File size: {os.path.getsize(main_path)} bytes")
 
 
-Cost_extract= (pd.read_excel(main_path, sheet_name="Cost extract report"))
-GL=(pd.read_excel(main_path, sheet_name="GL"))
+
+# Validate that required sheets exist in the file
+try:
+    # Check if required sheets exist
+    workbook = load_workbook(main_path)
+    available_sheets = workbook.sheetnames
+    print(f"Available sheets in file: {available_sheets}")
+    
+    required_sheets = ["Cost extract report", "GL"]
+    missing_sheets = [sheet for sheet in required_sheets if sheet not in available_sheets]
+    
+    if missing_sheets:
+        print(f"Error: Required sheets not found: {missing_sheets}")
+        print("Please ensure the file contains both 'Cost extract report' and 'GL' sheets.")
+        exit()
+    
+    print("All required sheets found. Proceeding with data processing...")
+    
+except Exception as e:
+    print(f"Error reading file structure: {str(e)}")
+    exit()
+
+# Read the data from the validated sheets
+Cost_extract = pd.read_excel(main_path, sheet_name="Cost extract report")
+GL = pd.read_excel(main_path, sheet_name="GL")
+
+print(f"Successfully loaded data:")
+print(f"  - Cost extract report: {len(Cost_extract)} rows")
+print(f"  - GL: {len(GL)} rows")
 
 # Create two separate tables with unique Concatenate values and summed amounts
 
@@ -89,8 +144,14 @@ print(f"Columns in final dataset: {list(merged_dataset.columns)}")
 print("\nSaving final dataset to existing Excel file...")
 output_filename = main_path
 
-# Use ExcelWriter with mode='a' to append to existing file without overwriting other sheets
-with pd.ExcelWriter(output_filename, mode='a', engine='openpyxl', if_sheet_exists='replace') as writer:
+# Load the existing workbook to check existing sheets
+workbook = load_workbook(output_filename)
+existing_sheets = set(workbook.sheetnames)
+print(f"Existing sheets in file: {list(existing_sheets)}")
+
+# Use ExcelWriter with mode='a' to append to existing file
+# Use 'overlay' instead of 'replace' to avoid overwriting existing sheets
+with pd.ExcelWriter(output_filename, mode='a', engine='openpyxl', if_sheet_exists='overlay') as writer:
     merged_dataset.to_excel(writer, index=False, sheet_name='Reconciliation_Summary')
 
 print(f"Final dataset saved successfully to: {output_filename}")
@@ -136,16 +197,21 @@ def normalize_date(date_value):
     
     return None
 
-def create_variance_sheets():
+def create_variance_sheets(main_file_path=None):
     """
-    Read Cost_Extract_Reconciliation_Summary.xlsx and create new sheets for each Row Label
+    Read the main Excel file and create new sheets for each Row Label
     where Variance is not 0. Each sheet will be named after the corresponding Row Label.
-    Also read source data from CP-ESCOA Cost extract Weekly reconcilition Final Jul 2025.xlsx to create tables.
+    Uses the same main file for both source data and output.
     """
     
-    # File paths
-    input_file = "Cost_Extract_Reconciliation_Summary.xlsx"
-    source_file = "CP-ESCOA Cost extract Weekly reconcilition Final Jul 2025.xlsx"
+    # Use the main file path if provided, otherwise try to find it
+    if main_file_path:
+        input_file = main_file_path
+        source_file = main_file_path
+    else:
+        # Try to find the main file in current directory
+        input_file = "Cost_Extract_Reconciliation_Summary.xlsx"
+        source_file = "CP-ESCOA Cost extract Weekly reconcilition Final Jul 2025.xlsx"
     
     # Check if input file exists
     if not os.path.exists(input_file):
@@ -153,11 +219,8 @@ def create_variance_sheets():
         print("Please ensure the file exists in the current directory.")
         return
     
-    # Check if source file exists
-    if not os.path.exists(source_file):
-        print(f"Error: {source_file} not found!")
-        print("Please ensure the source file exists in the current directory.")
-        return
+    # Since we're using the same file for both input and source, no need to check source_file separately
+    print(f"Using main file for both input and source: {input_file}")
     
     try:
         # Read the reconciliation summary
@@ -195,6 +258,13 @@ def create_variance_sheets():
         
         # Get existing sheet names to avoid conflicts
         existing_sheets = set(workbook.sheetnames)
+        print(f"Existing sheets in workbook: {list(existing_sheets)}")
+        
+        # Check if Reconciliation_Summary sheet exists
+        if 'Reconciliation_Summary' not in existing_sheets:
+            print("Warning: Reconciliation_Summary sheet not found in the file!")
+            print("Please run the main reconciliation process first.")
+            return
         
         # Process each row with non-zero variance
         sheets_created = 0
@@ -224,12 +294,13 @@ def create_variance_sheets():
                 print(f"Error creating sheet '{sheet_name}': {str(e)}")
                 continue
         
-        # Save the workbook with new sheets
-        print(f"\nSaving workbook with {sheets_created} new sheets...")
+        # Save the workbook with new sheets back to the same main file
+        print(f"\nSaving workbook with {sheets_created} new sheets to main file...")
         workbook.save(input_file)
         
         print(f"Successfully created {sheets_created} new sheets with tables in {input_file}")
         print("Each sheet contains GL and IBS tables with aggregated data.")
+        print("All data has been written to the same main file without disturbing existing data.")
         
         # Display summary
         print(f"\nSummary:")
@@ -1220,10 +1291,40 @@ def clean_sheet_name(name):
     
     return name
 
+def run_complete_reconciliation():
+    """
+    Run the complete reconciliation process including variance analysis.
+    This ensures everything is written to the same main file.
+    """
+    print("CP-ESCOA Cost Extract Reconciliation - Complete Process")
+    print("=" * 60)
+    
+    # The main reconciliation process runs automatically when the script is imported/run
+    # The main_path variable is set during the initial file processing
+    
+    # After the main reconciliation is complete, run variance analysis
+    if 'main_path' in globals():
+        print(f"\nMain reconciliation completed. Now running variance analysis...")
+        print(f"Using main file: {main_path}")
+        create_variance_sheets(main_path)
+    else:
+        print("Error: Main reconciliation process did not complete successfully.")
+        return False
+    
+    print("\nComplete reconciliation process finished!")
+    return True
+
 if __name__ == "__main__":
     print("CP-ESCOA Cost Extract Reconciliation - Variance Analysis")
     print("=" * 60)
     
-    create_variance_sheets()
+    # Check if main_path is available from the main reconciliation process
+    if 'main_path' in globals():
+        print(f"Using main file: {main_path}")
+        create_variance_sheets(main_path)
+    else:
+        print("Error: Main reconciliation process must be run first to set main_path.")
+        print("Please run the complete script to ensure main_path is available.")
+        exit()
     
     print("\nProcess completed!")
