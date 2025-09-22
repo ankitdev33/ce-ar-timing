@@ -32,6 +32,26 @@ if not os.path.exists(main_path):
 print(f"Selected file: {main_path}")
 print(f"File size: {os.path.getsize(main_path)} bytes")
 
+# Create a backup of the original file before making any changes
+def create_backup(file_path):
+    """Create a backup of the original file with timestamp"""
+    try:
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = f"{os.path.splitext(file_path)[0]}_backup_{timestamp}.xlsx"
+        
+        # Copy the file
+        import shutil
+        shutil.copy2(file_path, backup_path)
+        print(f"Backup created: {backup_path}")
+        return backup_path
+    except Exception as e:
+        print(f"Warning: Could not create backup: {str(e)}")
+        return None
+
+# Create backup before processing
+backup_file = create_backup(main_path)
+
 
 
 # Validate that required sheets exist in the file
@@ -132,14 +152,36 @@ workbook = load_workbook(output_filename)
 existing_sheets = set(workbook.sheetnames)
 print(f"Existing sheets in file: {list(existing_sheets)}")
 
+# Check if Reconciliation_Summary sheet already exists
+if 'Reconciliation_Summary' in existing_sheets:
+    print("Warning: Reconciliation_Summary sheet already exists!")
+    print("To preserve existing data, we will create a new sheet with timestamp.")
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    sheet_name = f'Reconciliation_Summary_{timestamp}'
+else:
+    sheet_name = 'Reconciliation_Summary'
+
+print(f"Creating sheet: {sheet_name}")
+
 # Use ExcelWriter with mode='a' to append to existing file
-# Use 'overlay' instead of 'replace' to avoid overwriting existing sheets
-with pd.ExcelWriter(output_filename, mode='a', engine='openpyxl', if_sheet_exists='overlay') as writer:
-    merged_dataset.to_excel(writer, index=False, sheet_name='Reconciliation_Summary')
+# Use 'new' to ensure we don't overwrite anything
+with pd.ExcelWriter(output_filename, mode='a', engine='openpyxl', if_sheet_exists='new') as writer:
+    merged_dataset.to_excel(writer, index=False, sheet_name=sheet_name)
 
 print(f"Final dataset saved successfully to: {output_filename}")
 print(f"File contains {len(merged_dataset)} rows and {len(merged_dataset.columns)} columns")
-print("Note: Existing sheets in the file have been preserved.")
+
+# Show final status of the file
+final_workbook = load_workbook(output_filename)
+final_sheets = set(final_workbook.sheetnames)
+print(f"\nFinal file status:")
+print(f"Total sheets in file: {len(final_sheets)}")
+print(f"All sheets: {list(final_sheets)}")
+print(f"New sheet created: {sheet_name}")
+print("✓ All existing data has been preserved")
+if backup_file:
+    print(f"✓ Original file backed up as: {backup_file}")
 
 # Now you have three datasets:
 # 1. GL_unique - GL data with unique Concatenate and summed Entered Amount
@@ -209,11 +251,32 @@ def create_variance_sheets(main_file_path=None):
         return
     
     try:
+        # Load the workbook to check for reconciliation sheets first
+        workbook = load_workbook(input_file)
+        existing_sheets = set(workbook.sheetnames)
+        print(f"Existing sheets in workbook: {list(existing_sheets)}")
+        
+        # Check if Reconciliation_Summary sheet exists (or any variation with timestamp)
+        reconciliation_sheets = [sheet for sheet in existing_sheets if sheet.startswith('Reconciliation_Summary')]
+        if not reconciliation_sheets:
+            print("Warning: No Reconciliation_Summary sheet found in the file!")
+            print("Please run the main reconciliation process first.")
+            return
+        
+        # Use the most recent Reconciliation_Summary sheet if multiple exist
+        if len(reconciliation_sheets) > 1:
+            print(f"Found multiple reconciliation sheets: {reconciliation_sheets}")
+            # Sort by timestamp if available, otherwise use the first one
+            reconciliation_sheets.sort(reverse=True)
+        
+        reconciliation_sheet_name = reconciliation_sheets[0]
+        print(f"Using reconciliation sheet: {reconciliation_sheet_name}")
+        
         # Read the reconciliation summary
         print(f"Reading {input_file}...")
-        reconciliation_data = pd.read_excel(input_file, sheet_name='Reconciliation_Summary')
+        reconciliation_data = pd.read_excel(input_file, sheet_name=reconciliation_sheet_name)
         
-        print(f"Successfully read {len(reconciliation_data)} rows from Reconciliation_Summary sheet")
+        print(f"Successfully read {len(reconciliation_data)} rows from {reconciliation_sheet_name} sheet")
         
         # Filter rows where Variance is not 0
         non_zero_variance = reconciliation_data[reconciliation_data['Variance'] != 0]
@@ -239,19 +302,6 @@ def create_variance_sheets(main_file_path=None):
             print(f"Error reading source data: {str(e)}")
             return
         
-        # Load the workbook to add new sheets
-        workbook = load_workbook(input_file)
-        
-        # Get existing sheet names to avoid conflicts
-        existing_sheets = set(workbook.sheetnames)
-        print(f"Existing sheets in workbook: {list(existing_sheets)}")
-        
-        # Check if Reconciliation_Summary sheet exists
-        if 'Reconciliation_Summary' not in existing_sheets:
-            print("Warning: Reconciliation_Summary sheet not found in the file!")
-            print("Please run the main reconciliation process first.")
-            return
-        
         # Process each row with non-zero variance
         sheets_created = 0
         for index, row in non_zero_variance.iterrows():
@@ -263,8 +313,13 @@ def create_variance_sheets(main_file_path=None):
             
             # Check if sheet already exists
             if sheet_name in existing_sheets:
-                print(f"Warning: Sheet '{sheet_name}' already exists. Skipping...")
-                continue
+                print(f"Warning: Sheet '{sheet_name}' already exists.")
+                # Create a unique sheet name with timestamp
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                original_sheet_name = sheet_name
+                sheet_name = f"{original_sheet_name}_{timestamp}"
+                print(f"Creating new sheet with unique name: {sheet_name}")
             
             try:
                 # Create new sheet
