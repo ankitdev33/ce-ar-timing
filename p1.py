@@ -85,13 +85,17 @@ print("\n=== Final Dataset with Variance Column ===")
 print(merged_dataset.head(10))
 print(f"Columns in final dataset: {list(merged_dataset.columns)}")
 
-# Save the final dataset to a new Excel file
-print("\nSaving final dataset to new Excel file...")
+# Save the final dataset to the existing Excel file without disturbing other sheets
+print("\nSaving final dataset to existing Excel file...")
 output_filename = main_path
-merged_dataset.to_excel(output_filename, index=False, sheet_name='Reconciliation_Summary')
+
+# Use ExcelWriter with mode='a' to append to existing file without overwriting other sheets
+with pd.ExcelWriter(output_filename, mode='a', engine='openpyxl', if_sheet_exists='replace') as writer:
+    merged_dataset.to_excel(writer, index=False, sheet_name='Reconciliation_Summary')
 
 print(f"Final dataset saved successfully to: {output_filename}")
 print(f"File contains {len(merged_dataset)} rows and {len(merged_dataset.columns)} columns")
+print("Note: Existing sheets in the file have been preserved.")
 
 # Now you have three datasets:
 # 1. GL_unique - GL data with unique Concatenate and summed Entered Amount
